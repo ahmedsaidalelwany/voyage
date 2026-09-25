@@ -26,14 +26,25 @@ abstract class ScaffoldAdapter implements SupplierAdapter {
 
     await controller.setNavigationDelegate(
       NavigationDelegate(
-        onPageFinished: (url) async => finish(await checkAuthSuccess(controller, url)),
-        onWebResourceError: (_) => finish(false),
+        onPageFinished: (url) async {
+          try {
+            finish(await checkAuthSuccess(controller, url));
+          } catch (_) {
+            finish(false);
+          }
+        },
+        onWebResourceError: (error) {
+          if (error.isForMainFrame) finish(false);
+        },
       ),
     );
 
     try {
       await controller.loadRequest(Uri.parse(supplier.authUrl));
-      return await completer.future.timeout(const Duration(seconds: 8), onTimeout: () => false);
+      return await completer.future.timeout(
+        const Duration(seconds: 10),
+        onTimeout: () => false,
+      );
     } catch (_) {
       return false;
     }
@@ -45,18 +56,34 @@ abstract class ScaffoldAdapter implements SupplierAdapter {
       final raw = await controller.runJavaScriptReturningResult('''
         (function() {
           const text = document.body ? document.body.innerText : '';
-          const hasLogout = /\\bLogout\\b|\\bSign out\\b|\\bMy Account\\b|\\bLog out\\b/i.test(text);
-          const hasLogin = /\\bLogin\\b|\\bSign in\\b|\\bLog in\\b/i.test(text);
-          return JSON.stringify({hasLogout, hasLogin});
+          const inputs = Array.from(document.querySelectorAll('input'));
+          const hasPassword = inputs.some(function(input) {
+            return (input.type || '').toLowerCase() === 'password';
+          });
+          const hasLogout = /\\bLogout\\b|\\bSign out\\b|\\bLog out\\b|\\bMy Account\\b|تسجيل خروج|خروج/i.test(text);
+          const hasLogin = /\\bLogin\\b|\\bSign in\\b|\\bLog in\\b|تسجيل الدخول|دخول/i.test(text);
+          const hasAccountMarker = /\\bDashboard\\b|\\bAccount\\b|\\bProfile\\b|\\bBookings\\b|حسابي|لوحة التحكم|الحجوزات/i.test(text);
+          const urlLooksLoggedIn = /\\/(home|dashboard|account|profile|bookings)(?:[/?#]|$)/i.test(location.pathname);
+          return JSON.stringify({
+            hasLogout: hasLogout,
+            hasLogin: hasLogin,
+            hasPassword: hasPassword,
+            hasAccountMarker: hasAccountMarker,
+            urlLooksLoggedIn: urlLooksLoggedIn
+          });
         })();
       ''');
       final text = raw.toString();
-      final decoded = jsonDecode(
-        text.length >= 2 && text.startsWith('"') && text.endsWith('"')
-            ? jsonDecode(text)
-            : text,
-      );
-      return decoded['hasLogout'] == true && decoded['hasLogin'] != true;
+      final jsonText = text.length >= 2 && text.startsWith('"') && text.endsWith('"')
+          ? jsonDecode(text)
+          : text;
+      final decoded = jsonDecode(jsonText.toString()) as Map<String, dynamic>;
+
+      return (decoded['hasLogout'] == true ||
+              (decoded['hasAccountMarker'] == true &&
+                  decoded['urlLooksLoggedIn'] == true)) &&
+          decoded['hasPassword'] != true &&
+          decoded['hasLogin'] != true;
     } catch (_) {
       return false;
     }
@@ -67,7 +94,9 @@ abstract class ScaffoldAdapter implements SupplierAdapter {
 
   @override
   Future<RawSupplierSearchResult> search(SearchCriteria criteria) async {
-    throw UnsupportedError('\${supplier.name} integration is currently unavailable. No documented API.');
+    throw UnsupportedError(
+      '${supplier.name} requires an authorized API/integration before live aggregation is enabled.',
+    );
   }
 }
 
