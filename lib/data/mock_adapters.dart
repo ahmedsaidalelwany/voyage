@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../domain/supplier_adapter.dart';
@@ -11,7 +12,32 @@ class MockRawResult extends RawSupplierSearchResult {
 
 abstract class ScaffoldAdapter implements SupplierAdapter {
   @override
-  Future<bool> isAuthenticated() async => false;
+  Future<bool> isAuthenticated() async {
+    final controller = WebViewController();
+    await controller.setJavaScriptMode(JavaScriptMode.unrestricted);
+    final completer = Completer<bool>();
+    var done = false;
+
+    void finish(bool value) {
+      if (done || completer.isCompleted) return;
+      done = true;
+      completer.complete(value);
+    }
+
+    await controller.setNavigationDelegate(
+      NavigationDelegate(
+        onPageFinished: (url) async => finish(await checkAuthSuccess(controller, url)),
+        onWebResourceError: (_) => finish(false),
+      ),
+    );
+
+    try {
+      await controller.loadRequest(Uri.parse(supplier.authUrl));
+      return await completer.future.timeout(const Duration(seconds: 8), onTimeout: () => false);
+    } catch (_) {
+      return false;
+    }
+  }
 
   @override
   Future<bool> checkAuthSuccess(WebViewController controller, String url) async {
