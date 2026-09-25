@@ -20,6 +20,7 @@ class AuthWebViewRoute extends StatefulWidget {
 class _AuthWebViewRouteState extends State<AuthWebViewRoute> {
   late final WebViewController _controller;
   bool _hasError = false;
+  bool _completionSent = false;
   String _errorMessage = '';
 
   @override
@@ -41,7 +42,8 @@ class _AuthWebViewRouteState extends State<AuthWebViewRoute> {
           onPageFinished: (String url) async {
             developer.log('[${widget.adapter.supplier.name}] Auth WebView Page finished: $url');
             bool isSuccess = await widget.adapter.checkAuthSuccess(_controller, url);
-            if (isSuccess && mounted) {
+            if (isSuccess && mounted && !_completionSent) {
+              _completionSent = true;
               widget.onAuthenticated();
             }
           },
