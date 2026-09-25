@@ -44,7 +44,7 @@ abstract class PortalSupplierAdapter implements SupplierAdapter {
   }
 
   @override
-  Future<void> disconnect() => WebViewCookieManager().clearCookies();
+  Future<void> disconnect() async { await WebViewCookieManager().clearCookies(); }
 
   @override
   Future<RawSupplierSearchResult> search(SearchCriteria criteria) async {
