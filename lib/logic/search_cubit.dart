@@ -32,6 +32,17 @@ class SearchCubit extends Cubit<SearchState> {
   SearchCubit(this._repository) : super(SearchInitial());
 
   Future<void> search(SearchCriteria criteria, List<SupplierAdapter> connectedAdapters) async {
+    if (criteria.checkOut.isBefore(criteria.checkIn) || criteria.nights < 1) {
+      emit(SearchFailure('Check-out must be after check-in.'));
+      return;
+    }
+    if (criteria.rooms.isEmpty ||
+        criteria.rooms.any((room) =>
+            room.adults < 1 ||
+            room.childrenAges.any((age) => age < 0 || age > 17))) {
+      emit(SearchFailure('Each room must contain at least one adult and valid child ages.'));
+      return;
+    }
     if (connectedAdapters.isEmpty) {
       emit(SearchFailure('No connected suppliers available for search.'));
       return;
@@ -128,6 +139,16 @@ class SearchCubit extends Cubit<SearchState> {
       final matchingOffers = hotel.offers.where((offer) {
         if (newFilters.supplierId != null && newFilters.supplierId != 'All' && offer.supplierId != newFilters.supplierId) return false;
         if (newFilters.availableOnly && offer.isAvailable == false) return false;
+        if (newFilters.mealPlan != null &&
+            newFilters.mealPlan!.isNotEmpty &&
+            !(offer.mealPlan ?? '').toLowerCase().contains(newFilters.mealPlan!.toLowerCase())) {
+          return false;
+        }
+        if (newFilters.cancellationPolicy != null &&
+            newFilters.cancellationPolicy!.isNotEmpty &&
+            !(offer.cancellationPolicy ?? '').toLowerCase().contains(newFilters.cancellationPolicy!.toLowerCase())) {
+          return false;
+        }
         if (newFilters.maxPrice != null && offer.price != null) {
           if (offer.currency != currentState.criteria.currency) return false;
           if (offer.price! > newFilters.maxPrice!) return false;
