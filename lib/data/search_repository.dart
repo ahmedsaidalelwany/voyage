@@ -57,6 +57,26 @@ class SearchRepository {
         continue;
       }
       final existing = grouped[key]!;
+      final existingIds = existing.offers
+          .map((offer) => offer.supplierHotelId)
+          .whereType<String>()
+          .toSet();
+      final incomingIds = hotel.offers
+          .map((offer) => offer.supplierHotelId)
+          .whereType<String>()
+          .toSet();
+      final sameKnownId = existingIds.isNotEmpty &&
+          incomingIds.isNotEmpty &&
+          existingIds.intersection(incomingIds).isNotEmpty;
+      final sameFallbackIdentity =
+          _normalizeText(existing.name) == _normalizeText(hotel.name) &&
+          _normalizeText(existing.city ?? '') == _normalizeText(hotel.city ?? '') &&
+          _normalizeText(existing.country ?? '') == _normalizeText(hotel.country ?? '') &&
+          (existing.stars == null || hotel.stars == null || existing.stars == hotel.stars);
+      if (!sameKnownId && !sameFallbackIdentity) {
+        grouped[key + '|' + hotel.id] = hotel;
+        continue;
+      }
       grouped[key] = Hotel(
         id: existing.id,
         name: existing.name,
@@ -72,10 +92,18 @@ class SearchRepository {
     return grouped.values.toList();
   }
 
-  String _matchKey(Hotel hotel) =>
-      _normalizeText(hotel.name) + '|' +
-      _normalizeText(hotel.city ?? '') + '|' +
-      _normalizeText(hotel.country ?? '');
+  String _matchKey(Hotel hotel) {
+    final ids = hotel.offers
+        .map((offer) => offer.supplierHotelId)
+        .whereType<String>()
+        .where((id) => id.isNotEmpty)
+        .toList();
+    if (ids.isNotEmpty) return 'supplier-id:' + ids.first;
+    return 'fallback:' +
+        _normalizeText(hotel.name) + '|' +
+        _normalizeText(hotel.city ?? '') + '|' +
+        _normalizeText(hotel.country ?? '');
+  }
 
   String _stableHotelId({
     required String name,
