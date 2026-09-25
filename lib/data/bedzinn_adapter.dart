@@ -21,7 +21,41 @@ class BedzinnAdapter implements SupplierAdapter {
   );
 
   @override
-  Future<bool> isAuthenticated() async => false;
+  Future<bool> isAuthenticated() async {
+    final controller = WebViewController();
+    await controller.setJavaScriptMode(JavaScriptMode.unrestricted);
+    final completer = Completer<bool>();
+    var done = false;
+
+    void finish(bool value) {
+      if (done || completer.isCompleted) return;
+      done = true;
+      completer.complete(value);
+    }
+
+    await controller.setNavigationDelegate(
+      NavigationDelegate(
+        onPageFinished: (url) async {
+          try {
+            finish(await checkAuthSuccess(controller, url));
+          } catch (_) {
+            finish(false);
+          }
+        },
+        onWebResourceError: (_) => finish(false),
+      ),
+    );
+
+    try {
+      await controller.loadRequest(Uri.parse(supplier.authUrl));
+      return await completer.future.timeout(
+        const Duration(seconds: 8),
+        onTimeout: () => false,
+      );
+    } catch (_) {
+      return false;
+    }
+  }
 
   @override
   Future<bool> checkAuthSuccess(WebViewController controller, String url) async {
@@ -72,9 +106,11 @@ class BedzinnAdapter implements SupplierAdapter {
         final raw = await controller.runJavaScriptReturningResult('''
           (function() {
             const selectors = [
-              '.hotel-item','.result-card','.property-card','.hotel_list',
+              '[data-hotel-id]','[data-property-id]','article','table tbody tr',
+              '.hotel-item','.hotel-card','.result-card','.property-card','.hotel_list',
               '[class*="hotel-item"]','[class*="hotel-card"]',
-              '[class*="hotel-list"]','[class*="property-card"]'
+              '[class*="hotel-list"]','[class*="property-card"]',
+              '[class*="result-card"]','[class*="hotel_row"]'
             ];
             let cards = [];
             for (const selector of selectors) {
@@ -83,7 +119,8 @@ class BedzinnAdapter implements SupplierAdapter {
             }
             return JSON.stringify(cards.map(card => {
               const titleNode = card.querySelector(
-                '.hotel-title,.hotel-name,h3,h4,[class*="hotel-name"],[class*="property-name"]'
+                '[data-hotel-name],.hotel-title,.hotel-name,.property-name,h1,h2,h3,h4,h5,' +
+                '[class*="hotel-name"],[class*="property-name"],[class*="name"]'
               );
               const priceNode = card.querySelector(
                 '.price,.amount,.room-price,[class*="price"],[class*="amount"]'
@@ -97,13 +134,20 @@ class BedzinnAdapter implements SupplierAdapter {
               const title = titleNode?.innerText?.trim() || '';
               const priceText = priceNode?.innerText?.trim() || '';
               const priceMatch = priceText.replace(/,/g, '').match(/-?\\d+(?:\\.\\d+)?/);
+              const currencyMatch = priceText.match(/\b(AED|USD|EUR|GBP|EGP|SAR|QAR|KWD|BHD|OMR)\b/i);
+              const images = Array.from(card.querySelectorAll('img'))
+                .map(img => img.currentSrc || img.src || '')
+                .filter(src => /^https?:/i.test(src))
+                .slice(0, 5);
               return {
                 name: title,
                 price: priceMatch ? Number(priceMatch[0]) : null,
                 rawPriceString: priceText,
-                currency: null,
+                currency: currencyMatch ? currencyMatch[1].toUpperCase() : null,
                 roomType: roomNode?.innerText?.trim() || null,
-                mealPlan: mealNode?.innerText?.trim() || null
+                mealPlan: mealNode?.innerText?.trim() || null,
+                images: images,
+                supplierHotelId: card.getAttribute('data-hotel-id') || card.getAttribute('data-property-id') || null
               };
             }).filter(item => item.name.length > 0));
           })();
@@ -115,9 +159,15 @@ class BedzinnAdapter implements SupplierAdapter {
             : <Map<String, dynamic>>[];
 
         if (results.isEmpty) {
+          final bodyText = await controller.runJavaScriptReturningResult('''
+            (function() {
+              return document.body ? document.body.innerText.slice(0, 2000) : '';
+            })();
+          ''');
+          developer.log('[Bedzinn] No result cards. Page text snapshot: $bodyText');
           throw StateError(
-            'Bedzinn search completed but no hotel result cards were detected. '
-            'The authenticated supplier search page structure may have changed.',
+            'Bedzinn returned a search page, but no hotel offers could be identified. '
+            'The supplier page structure or search flow requires an updated integration.',
           );
         }
         completer.complete(results);
