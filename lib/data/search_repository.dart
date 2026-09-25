@@ -1,6 +1,8 @@
 import '../domain/hotel.dart';
 import '../domain/hotel_offer.dart';
 import '../domain/raw_supplier_search_result.dart';
+import '../domain/result_filters.dart';
+import '../domain/search_criteria.dart';
 import 'bedzinn_adapter.dart';
 
 class SearchRepository {
@@ -48,55 +50,114 @@ class SearchRepository {
     return [];
   }
 
+  List<Hotel> applyFilters(List<Hotel> hotels, SearchCriteria criteria) {
+    return filterHotels(
+      hotels,
+      ResultFilters(
+        maxPrice: criteria.maximumPrice,
+        minRating: criteria.minimumStars,
+        mealPlan: criteria.mealPlan,
+        cancellationPolicy: criteria.cancellationPreference,
+        availableOnly: criteria.availableOnly,
+      ),
+      criteria,
+    );
+  }
+
+  List<Hotel> filterHotels(
+    List<Hotel> hotels,
+    ResultFilters filters,
+    SearchCriteria criteria,
+  ) {
+    return hotels.map((hotel) {
+      final query = criteria.hotelName?.trim().toLowerCase();
+      if (query != null && query.isNotEmpty && !hotel.name.toLowerCase().contains(query)) {
+        return null;
+      }
+
+      if (filters.minRating != null && (hotel.stars ?? 0) < filters.minRating!) {
+        return null;
+      }
+
+      final offers = hotel.offers.where((offer) {
+        if (filters.supplierId != null && filters.supplierId != 'All' && offer.supplierId != filters.supplierId) {
+          return false;
+        }
+        if (filters.availableOnly && offer.isAvailable != true) return false;
+        if (filters.mealPlan != null &&
+            filters.mealPlan!.isNotEmpty &&
+            !(offer.mealPlan ?? '').toLowerCase().contains(filters.mealPlan!.toLowerCase())) {
+          return false;
+        }
+        if (filters.cancellationPolicy != null &&
+            filters.cancellationPolicy!.isNotEmpty &&
+            !(offer.cancellationPolicy ?? '').toLowerCase().contains(filters.cancellationPolicy!.toLowerCase())) {
+          return false;
+        }
+        if (filters.maxPrice != null && offer.price != null) {
+          if (offer.currency != criteria.currency) return false;
+          if (offer.price! > filters.maxPrice!) return false;
+        }
+        return true;
+      }).toList();
+
+      if (offers.isEmpty) return null;
+      return hotel.copyWithOffers(offers);
+    }).whereType<Hotel>().toList();
+  }
+
   List<Hotel> matchHotels(List<Hotel> rawHotels) {
     final grouped = <String, Hotel>{};
+
     for (final hotel in rawHotels) {
       final key = _matchKey(hotel);
-      if (!grouped.containsKey(key)) {
+      final existing = grouped[key];
+
+      if (existing == null) {
         grouped[key] = hotel;
         continue;
       }
-      final existing = grouped[key]!;
-      final existingIds = existing.offers
-          .map((offer) => offer.supplierHotelId)
-          .whereType<String>()
-          .toSet();
-      final incomingIds = hotel.offers
-          .map((offer) => offer.supplierHotelId)
-          .whereType<String>()
-          .toSet();
-      final sameKnownId = existingIds.isNotEmpty &&
+
+      final existingIds = existing.offers.map((offer) => offer.supplierHotelId)
+          .whereType<String>().where((id) => id.isNotEmpty).toSet();
+      final incomingIds = hotel.offers.map((offer) => offer.supplierHotelId)
+          .whereType<String>().where((id) => id.isNotEmpty).toSet();
+
+      if (existingIds.isNotEmpty &&
           incomingIds.isNotEmpty &&
-          existingIds.intersection(incomingIds).isNotEmpty;
-      final sameFallbackIdentity =
-          _normalizeText(existing.name) == _normalizeText(hotel.name) &&
-          _normalizeText(existing.city ?? '') == _normalizeText(hotel.city ?? '') &&
-          _normalizeText(existing.country ?? '') == _normalizeText(hotel.country ?? '') &&
-          (existing.stars == null || hotel.stars == null || existing.stars == hotel.stars);
-      if (!sameKnownId && !sameFallbackIdentity) {
-        grouped[key + '|' + hotel.id] = hotel;
-        continue;
+          existingIds.intersection(incomingIds).isNotEmpty) {
+        grouped[key] = _merge(existing, hotel);
+      } else {
+        final uniqueKey = key + '|' + hotel.offers.first.supplierId + '|' + hotel.id;
+        grouped[uniqueKey] = hotel;
       }
-      grouped[key] = Hotel(
-        id: existing.id,
-        name: existing.name,
-        location: existing.location ?? hotel.location,
-        city: existing.city ?? hotel.city,
-        country: existing.country ?? hotel.country,
-        stars: existing.stars ?? hotel.stars,
-        rating: existing.rating ?? hotel.rating,
-        images: existing.images.isNotEmpty ? existing.images : hotel.images,
-        offers: [...existing.offers, ...hotel.offers],
-      );
     }
+
     return grouped.values.toList();
   }
 
+  Hotel _merge(Hotel a, Hotel b) {
+    return Hotel(
+      id: a.id,
+      name: a.name,
+      location: a.location ?? b.location,
+      city: a.city ?? b.city,
+      country: a.country ?? b.country,
+      stars: a.stars ?? b.stars,
+      rating: a.rating ?? b.rating,
+      images: a.images.isNotEmpty ? a.images : b.images,
+      offers: [...a.offers, ...b.offers],
+    );
+  }
+
   String _matchKey(Hotel hotel) {
-    return 'hotel:' +
-        _normalizeText(hotel.name) + '|' +
+    final id = hotel.offers.map((offer) => offer.supplierHotelId)
+        .whereType<String>().where((id) => id.isNotEmpty).join('|');
+    if (id.isNotEmpty) return 'supplier-id:' + id;
+    return 'hotel:' + _normalizeText(hotel.name) + '|' +
         _normalizeText(hotel.city ?? '') + '|' +
-        _normalizeText(hotel.country ?? '');
+        _normalizeText(hotel.country ?? '') + '|' +
+        (hotel.stars ?? 0).toString();
   }
 
   String _stableHotelId({
