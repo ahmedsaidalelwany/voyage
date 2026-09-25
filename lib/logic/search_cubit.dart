@@ -67,7 +67,7 @@ class SearchCubit extends Cubit<SearchState> {
           ', rooms=' + criteria.rooms.length.toString(),
         );
 
-        final rawResult = await adapter.search(criteria).timeout(const Duration(seconds: 30));
+        final rawResult = await adapter.search(criteria).timeout(const Duration(seconds: 90));
         final normalized = _repository.normalize(rawResult);
 
         final index = progressList.indexWhere((item) => item.supplierId == adapter.supplier.id);

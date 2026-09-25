@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:go_router/go_router.dart';
 import '../logic/search_cubit.dart';
 import '../domain/search_criteria.dart';
 import '../domain/hotel.dart';
@@ -9,7 +10,7 @@ import '../domain/supplier_search_progress.dart';
 class SearchResultsScreen extends StatelessWidget {
   final SearchCriteria? criteria;
 
-  const SearchResultsScreen({Key? key, this.criteria}) : super(key: key);
+  const SearchResultsScreen({super.key, this.criteria});
 
   @override
   Widget build(BuildContext context) {
