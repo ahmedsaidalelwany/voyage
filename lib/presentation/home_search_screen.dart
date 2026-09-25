@@ -87,10 +87,20 @@ occupancy = ${criteria.rooms.map((r) => '\${r.adults}A, \${r.childrenAges.length
     return Scaffold(
       appBar: AppBar(title: const Text('Search Hotels')),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            const Text(
+              'Find hotels',
+              style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Search across your connected suppliers.',
+              style: TextStyle(color: Colors.black54),
+            ),
+            const SizedBox(height: 20),
             Autocomplete<Destination>(
               displayStringForOption: (Destination option) => option.name,
               optionsBuilder: (TextEditingValue textEditingValue) {
