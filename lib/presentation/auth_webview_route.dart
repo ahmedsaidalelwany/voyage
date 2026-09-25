@@ -103,28 +103,8 @@ class _AuthWebViewRouteState extends State<AuthWebViewRoute> {
   }
 
   Future<void> _manualComplete() async {
-    final controller = _controller;
-    if (controller == null) return;
-
-    setState(() => _checking = true);
-    try {
-      final authenticated = await widget.adapter.checkAuthSuccess(
-        controller,
-        (await controller.currentUrl()) ?? '',
-      );
-      if (!authenticated) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Login was not detected yet. Finish signing in, then try again.'),
-          ),
-        );
-        return;
-      }
-      await _completeAuthentication();
-    } finally {
-      if (mounted) setState(() => _checking = false);
-    }
+    if (_controller == null || _checking) return;
+    await _completeAuthentication();
   }
 
   @override
@@ -172,7 +152,7 @@ class _AuthWebViewRouteState extends State<AuthWebViewRoute> {
         child: FilledButton.icon(
           onPressed: _checking ? null : _manualComplete,
           icon: const Icon(Icons.check_circle_outline),
-          label: const Text('I finished signing in'),
+          label: const Text('Continue to Voyage'),
         ),
       ),
     );
