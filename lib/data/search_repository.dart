@@ -93,13 +93,7 @@ class SearchRepository {
   }
 
   String _matchKey(Hotel hotel) {
-    final ids = hotel.offers
-        .map((offer) => offer.supplierHotelId)
-        .whereType<String>()
-        .where((id) => id.isNotEmpty)
-        .toList();
-    if (ids.isNotEmpty) return 'supplier-id:' + ids.first;
-    return 'fallback:' +
+    return 'hotel:' +
         _normalizeText(hotel.name) + '|' +
         _normalizeText(hotel.city ?? '') + '|' +
         _normalizeText(hotel.country ?? '');
