@@ -1,11 +1,11 @@
-import 'package:webview_flutter/webview_flutter.dart';
-import '../domain/supplier_adapter.dart';
-import '../domain/supplier_identity.dart';
-import '../domain/search_criteria.dart';
-import '../domain/raw_supplier_search_result.dart';
-import 'dart:developer' as developer;
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer' as developer;
+import 'package:webview_flutter/webview_flutter.dart';
+import '../domain/raw_supplier_search_result.dart';
+import '../domain/search_criteria.dart';
+import '../domain/supplier_adapter.dart';
+import '../domain/supplier_identity.dart';
 
 class BedzinnRawResult extends RawSupplierSearchResult {
   final List<Map<String, dynamic>> scrapedHotels;
@@ -15,159 +15,230 @@ class BedzinnRawResult extends RawSupplierSearchResult {
 class BedzinnAdapter implements SupplierAdapter {
   @override
   SupplierIdentity get supplier => const SupplierIdentity(
-        id: 'bedzinn',
-        name: 'Bedzinn',
-        authUrl: 'https://www.bedzinn.com/',
-      );
+    id: 'bedzinn',
+    name: 'Bedzinn',
+    authUrl: 'https://www.bedzinn.com/',
+  );
 
   @override
-  Future<bool> isAuthenticated() async {
-    return false; // Skip the automatic check for now to save time in the POC, we rely on the manual auth flow.
-  }
+  Future<bool> isAuthenticated() async => false;
 
   @override
   Future<bool> checkAuthSuccess(WebViewController controller, String url) async {
     try {
-      final String html = await controller.runJavaScriptReturningResult('document.body.innerHTML') as String;
-      if (html.contains('my_accnt') || html.contains('Logout') || html.contains('sign_out') || url.contains('service_search.php')) {
-        return true;
-      }
-    } catch (e) {
-      developer.log('[${supplier.name}] Error checking auth: $e');
+      final result = await controller.runJavaScriptReturningResult('''
+        (function() {
+          const text = document.body ? document.body.innerText : '';
+          return JSON.stringify({
+            hasLogout: /\\bLogout\\b|\\bSign out\\b|\\bMy Account\\b/i.test(text),
+            hasLogin: /\\bLogin\\b|\\bSign in\\b/i.test(text)
+          });
+        })();
+      ''');
+      final decoded = jsonDecode(_unwrapJsString(result));
+      return decoded['hasLogout'] == true && decoded['hasLogin'] != true;
+    } catch (error) {
+      developer.log('[Bedzinn] Auth check failed: $error');
+      return false;
     }
-    return false;
   }
 
   @override
   Future<void> disconnect() async {
-    final cookieManager = WebViewCookieManager();
-    await cookieManager.clearCookies();
+    await WebViewCookieManager().clearCookies();
   }
 
   @override
   Future<RawSupplierSearchResult> search(SearchCriteria criteria) async {
-    developer.log('[${supplier.name}] Searching via WebViewController scraping...');
-    
-    // We will spin up an off-screen WebViewController to perform the search.
+    developer.log(
+      '[Bedzinn] Search started: destination=' + criteria.destination.name +
+      ', checkIn=' + criteria.checkIn.toIso8601String() +
+      ', checkOut=' + criteria.checkOut.toIso8601String() +
+      ', rooms=' + criteria.rooms.length.toString() +
+      ', currency=' + criteria.currency,
+    );
+
     final controller = WebViewController();
     await controller.setJavaScriptMode(JavaScriptMode.unrestricted);
 
-    // Bedzinn currency support mapping
-    // If criteria.currency is not supported, we must log a limitation.
-    // Bedzinn typically uses the currency of the logged-in agent, but might have a currency dropdown.
-    developer.log('[${supplier.name}] Requested Currency: ${criteria.currency}. Will attempt to set if supported.');
-
     final completer = Completer<List<Map<String, dynamic>>>();
+    var submitted = false;
+    var extractionStarted = false;
 
-    controller.setNavigationDelegate(NavigationDelegate(
-      onPageFinished: (url) async {
-        developer.log('[${supplier.name}] Page loaded: $url');
-        
-        if (url.contains('service_search.php') || url == 'https://www.bedzinn.com/') {
+    Future<void> extractResults() async {
+      if (extractionStarted || completer.isCompleted) return;
+      extractionStarted = true;
+      try {
+        final raw = await controller.runJavaScriptReturningResult('''
+          (function() {
+            const selectors = [
+              '.hotel-item','.result-card','.property-card','.hotel_list',
+              '[class*="hotel-item"]','[class*="hotel-card"]',
+              '[class*="hotel-list"]','[class*="property-card"]'
+            ];
+            let cards = [];
+            for (const selector of selectors) {
+              const found = Array.from(document.querySelectorAll(selector));
+              if (found.length > cards.length) cards = found;
+            }
+            return JSON.stringify(cards.map(card => {
+              const titleNode = card.querySelector(
+                '.hotel-title,.hotel-name,h3,h4,[class*="hotel-name"],[class*="property-name"]'
+              );
+              const priceNode = card.querySelector(
+                '.price,.amount,.room-price,[class*="price"],[class*="amount"]'
+              );
+              const roomNode = card.querySelector(
+                '.room-type,.room-name,[class*="room-type"],[class*="room-name"]'
+              );
+              const mealNode = card.querySelector(
+                '.meal-plan,.board-type,[class*="meal"],[class*="board"]'
+              );
+              const title = titleNode?.innerText?.trim() || '';
+              const priceText = priceNode?.innerText?.trim() || '';
+              const priceMatch = priceText.replace(/,/g, '').match(/-?\\d+(?:\\.\\d+)?/);
+              return {
+                name: title,
+                price: priceMatch ? Number(priceMatch[0]) : null,
+                rawPriceString: priceText,
+                currency: null,
+                roomType: roomNode?.innerText?.trim() || null,
+                mealPlan: mealNode?.innerText?.trim() || null
+              };
+            }).filter(item => item.name.length > 0));
+          })();
+        ''');
+
+        final decoded = jsonDecode(_unwrapJsString(raw));
+        final results = decoded is List
+            ? decoded.whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList()
+            : <Map<String, dynamic>>[];
+
+        if (results.isEmpty) {
+          throw StateError(
+            'Bedzinn search completed but no hotel result cards were detected. '
+            'The authenticated supplier search page structure may have changed.',
+          );
+        }
+        completer.complete(results);
+      } catch (error, stackTrace) {
+        developer.log('[Bedzinn] Result extraction failed: $error', stackTrace: stackTrace);
+        completer.completeError(error, stackTrace);
+      }
+    }
+
+    controller.setNavigationDelegate(
+      NavigationDelegate(
+        onPageFinished: (url) async {
+          developer.log('[Bedzinn] Page finished: $url');
+          if (submitted) {
+            await Future<void>.delayed(const Duration(seconds: 1));
+            await extractResults();
+            return;
+          }
+
+          submitted = true;
           try {
-            // Attempt to inject search criteria into the DOM and submit
-            // This is a generic heuristic scraper since we lack the exact DOM structure
-            final jsCode = '''
-              try {
-                // 1. Fill Destination
-                const destInput = document.querySelector('input[name="destination"], input[name="city"], input[placeholder*="Destination"], #search_destination');
-                if (destInput) {
-                   destInput.value = "${criteria.destination.name}";
-                }
-                
-                // 2. Fill Dates
-                const checkInInput = document.querySelector('input[name="checkin"], input[name="fromDate"], #checkin');
-                if (checkInInput) {
-                   checkInInput.value = "${criteria.checkIn.toIso8601String().split('T')[0]}";
-                }
-                const checkOutInput = document.querySelector('input[name="checkout"], input[name="toDate"], #checkout');
-                if (checkOutInput) {
-                   checkOutInput.value = "${criteria.checkOut.toIso8601String().split('T')[0]}";
+            final payload = jsonEncode({
+              'destination': criteria.destination.name,
+              'checkIn': criteria.checkIn.toIso8601String().split('T').first,
+              'checkOut': criteria.checkOut.toIso8601String().split('T').first,
+              'currency': criteria.currency,
+              'rooms': criteria.rooms.map((room) => {
+                'adults': room.adults,
+                'childrenAges': room.childrenAges,
+              }).toList(),
+            });
+
+            final js = '''
+              (function() {
+                const request = $payload;
+                const setValue = (selectors, value) => {
+                  const input = selectors.map(s => document.querySelector(s)).find(e => e);
+                  if (!input) return false;
+                  input.focus();
+                  input.value = value;
+                  input.dispatchEvent(new Event('input', {bubbles:true}));
+                  input.dispatchEvent(new Event('change', {bubbles:true}));
+                  input.blur();
+                  return true;
+                };
+
+                const destinationSet = setValue(
+                  ['input[name="destination"]','input[name="city"]','#search_destination',
+                   'input[placeholder*="Destination" i]','input[placeholder*="City" i]'],
+                  request.destination
+                );
+                const checkInSet = setValue(
+                  ['input[name="checkin"]','input[name="fromDate"]','#checkin',
+                   'input[name="check_in"]','input[name="checkIn"]'],
+                  request.checkIn
+                );
+                const checkOutSet = setValue(
+                  ['input[name="checkout"]','input[name="toDate"]','#checkout',
+                   'input[name="check_out"]','input[name="checkOut"]'],
+                  request.checkOut
+                );
+
+                const currency = document.querySelector('select[name="currency"],select#currency');
+                if (currency) {
+                  currency.value = request.currency;
+                  currency.dispatchEvent(new Event('change', {bubbles:true}));
                 }
 
-                // 3. Set Currency if possible
-                const currSelect = document.querySelector('select[name="currency"]');
-                if (currSelect) {
-                   currSelect.value = "${criteria.currency}";
+                const button = document.querySelector(
+                  'button[type="submit"],input[type="submit"],#btnSearch,.SearchBtn3'
+                );
+                if (button) {
+                  button.click();
+                  return 'submitted';
                 }
-                
-                // 4. Click Search
-                const searchBtn = document.querySelector('button[type="submit"], input[type="submit"], #btnSearch, .SearchBtn3');
-                if (searchBtn) {
-                   searchBtn.click();
-                } else {
-                   // Fallback submit form
-                   document.forms[0].submit();
+
+                const form = document.querySelector('form');
+                if (form) {
+                  form.submit();
+                  return 'submitted-form';
                 }
-              } catch(e) {
-                console.log(e);
-              }
-            ''';
-            
-            await controller.runJavaScript(jsCode);
-            
-            // Wait a few seconds for ajax/results
-            await Future.delayed(const Duration(seconds: 4));
-            
-            // Extract results
-            final extractJs = '''
-              (function() {
-                const hotels = [];
-                // Look for common hotel card classes
-                const cards = document.querySelectorAll('.hotel-item, .result-card, .property-card, .hotel_list');
-                cards.forEach(card => {
-                   const title = card.querySelector('.hotel-title, .hotel-name, h3, h4')?.innerText || 'Unknown Hotel';
-                   const priceText = card.querySelector('.price, .amount, .room-price')?.innerText || '';
-                   // Extract numbers from price
-                   const priceMatch = priceText.replace(/,/g, '').match(/\\d+(\\.\\d+)?/);
-                   const price = priceMatch ? parseFloat(priceMatch[0]) : null;
-                   
-                   hotels.push({
-                     name: title,
-                     price: price,
-                     rawPriceString: priceText,
-                     currency: "${criteria.currency}", // Assuming it reflects our requested currency
-                     roomType: card.querySelector('.room-type, .room-name')?.innerText || 'Standard Room',
-                     mealPlan: card.querySelector('.meal-plan, .board-type')?.innerText || 'Room Only',
-                   });
-                });
-                return JSON.stringify(hotels);
+
+                return 'search-controls-not-found:' +
+                  [destinationSet,checkInSet,checkOutSet].join(',');
               })();
             ''';
-            
-            final Object rawResult = await controller.runJavaScriptReturningResult(extractJs);
-            final String jsonString = rawResult as String;
-            final dynamic firstDecode = jsonDecode(jsonString);
-            
-            final List<dynamic> parsed;
-            if (firstDecode is String) {
-              parsed = jsonDecode(firstDecode) as List<dynamic>;
-            } else {
-              parsed = firstDecode as List<dynamic>;
-            }
-            
-            final List<Map<String, dynamic>> results = parsed.map((e) => e as Map<String, dynamic>).toList();
-            
-            if (!completer.isCompleted) {
-               completer.complete(results);
-            }
-          } catch (e) {
-            developer.log('[${supplier.name}] Error scraping: $e');
-            if (!completer.isCompleted) completer.complete([]);
+
+            final submissionResult = await controller.runJavaScriptReturningResult(js);
+            developer.log('[Bedzinn] Search submission result: $submissionResult');
+            await Future<void>.delayed(const Duration(seconds: 2));
+            await extractResults();
+          } catch (error, stackTrace) {
+            developer.log('[Bedzinn] Search execution failed: $error', stackTrace: stackTrace);
+            if (!completer.isCompleted) completer.completeError(error, stackTrace);
           }
-        }
-      },
-    ));
+        },
+        onWebResourceError: (error) {
+          developer.log('[Bedzinn] Web resource error: ' +
+              error.errorCode.toString() + ' ' + error.description);
+        },
+      ),
+    );
 
-    await controller.loadRequest(Uri.parse('https://www.bedzinn.com/service_search.php'));
+    await controller.loadRequest(Uri.parse(supplier.authUrl));
 
-    // Wait for the scraping flow to finish or timeout
     try {
-      final results = await completer.future.timeout(const Duration(seconds: 15));
+      final results = await completer.future.timeout(const Duration(seconds: 30));
       return BedzinnRawResult(results);
-    } catch (e) {
-      developer.log('[${supplier.name}] Scraping timeout or error: $e');
-      throw Exception('Bedzinn scraping failed or timed out: $e');
+    } on TimeoutException {
+      throw TimeoutException('Bedzinn search did not produce results within 30 seconds.');
     }
+  }
+
+  String _unwrapJsString(Object value) {
+    final text = value.toString();
+    if (text.length >= 2 && text.startsWith('"') && text.endsWith('"')) {
+      try {
+        final decoded = jsonDecode(text);
+        if (decoded is String) return decoded;
+      } catch (_) {}
+    }
+    return text;
   }
 }
