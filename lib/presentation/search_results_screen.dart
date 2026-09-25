@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../logic/search_cubit.dart';
 import '../domain/search_criteria.dart';
 import '../domain/hotel.dart';
+import '../domain/hotel_offer.dart';
 import '../domain/supplier_search_progress.dart';
 
 class SearchResultsScreen extends StatelessWidget {
