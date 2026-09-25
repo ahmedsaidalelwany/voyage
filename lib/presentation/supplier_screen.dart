@@ -48,12 +48,22 @@ class SupplierScreen extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Connect your hotel suppliers'),
+        title: const Text('Hotel suppliers'),
       ),
       body: BlocBuilder<SupplierConnectionCubit, SupplierConnectionState>(
         builder: (context, state) {
           return Column(
             children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Connect your authorized supplier accounts once.',
+                    style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  ),
+                ),
+              ),
               Expanded(
                 child: ListView.builder(
                   itemCount: adapters.length,
@@ -61,7 +71,12 @@ class SupplierScreen extends StatelessWidget {
                     final adapter = adapters[index];
                     final statusData = state.states[adapter.supplier.id];
                     final status = statusData?.status ?? SupplierConnectionStatus.disconnected;
-                    return _buildSupplierTile(context, adapter, status);
+                    return Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+                      child: Card(
+                        child: _buildSupplierTile(context, adapter, status),
+                      ),
+                    );
                   },
                 ),
               ),
