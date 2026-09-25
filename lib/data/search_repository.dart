@@ -4,9 +4,17 @@ import '../domain/raw_supplier_search_result.dart';
 import '../domain/result_filters.dart';
 import '../domain/search_criteria.dart';
 import 'bedzinn_adapter.dart';
+import 'mock_adapters.dart';
 
 class SearchRepository {
   List<Hotel> normalize(RawSupplierSearchResult rawResult) {
+    if (rawResult is PortalRawResult) {
+      return _normalizeHotels(
+        rawResult.supplierId,
+        rawResult.hotels,
+      );
+    }
+
     if (rawResult is BedzinnRawResult) {
       return rawResult.scrapedHotels
           .where((data) => data['name']?.toString().trim().isNotEmpty ?? false)
@@ -48,6 +56,51 @@ class SearchRepository {
       }).toList();
     }
     return [];
+  }
+
+  List<Hotel> _normalizeHotels(
+    String supplierId,
+    List<Map<String, dynamic>> dataList,
+  ) {
+    return dataList
+        .where((data) => data['name']?.toString().trim().isNotEmpty ?? false)
+        .map((data) {
+          final name = data['name'].toString().trim();
+          return Hotel(
+            id: _stableHotelId(
+              name: name,
+              city: data['city']?.toString(),
+              country: data['country']?.toString(),
+              supplierHotelId: data['supplierHotelId']?.toString(),
+            ),
+            name: name,
+            location: data['location']?.toString(),
+            city: data['city']?.toString(),
+            country: data['country']?.toString(),
+            stars: _toInt(data['stars']),
+            rating: _toDouble(data['rating']),
+            images: _stringList(data['images']),
+            offers: [
+              HotelOffer(
+                supplierId: supplierId,
+                supplierHotelId: data['supplierHotelId']?.toString(),
+                roomType: data['roomType']?.toString(),
+                roomDescription: data['roomDescription']?.toString(),
+                numberOfRooms: _toInt(data['numberOfRooms']),
+                adults: _toInt(data['adults']),
+                children: _toInt(data['children']),
+                mealPlan: data['mealPlan']?.toString(),
+                cancellationPolicy: data['cancellationPolicy']?.toString(),
+                isAvailable: data['isAvailable'] as bool?,
+                price: _toDouble(data['price']),
+                currency: data['currency']?.toString(),
+                taxes: _toDouble(data['taxes']),
+                totalPrice: _toDouble(data['totalPrice']),
+              ),
+            ],
+          );
+        })
+        .toList();
   }
 
   List<Hotel> applyFilters(List<Hotel> hotels, SearchCriteria criteria) {
