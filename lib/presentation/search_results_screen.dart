@@ -88,13 +88,8 @@ class SearchResultsScreen extends StatelessWidget {
                       TextButton.icon(
                         icon: const Icon(Icons.filter_list),
                         label: const Text('Filters'),
-                        onPressed: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Filters will only be applied when backed by real result data.'),
-                            ),
-                          );
-                        },
+                        onPressed: () => _showFilters(context, state),
+
                       ),
                     ],
                   ),
@@ -115,6 +110,159 @@ class SearchResultsScreen extends StatelessWidget {
         },
       ),
     );
+  }
+
+  Future<void> _showFilters(BuildContext context, SearchSuccess state) async {
+    var minStars = state.filters.minRating;
+    var maxPrice = state.filters.maxPrice;
+    var supplier = state.filters.supplierId;
+    var meal = state.filters.mealPlan;
+    var cancellation = state.filters.cancellationPolicy;
+    var availableOnly = state.filters.availableOnly;
+
+    final priceController = TextEditingController(
+      text: maxPrice?.toStringAsFixed(0) ?? '',
+    );
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            final suppliers = <String>[
+              'All',
+              ...state.progress
+                  .where((p) => p.status == SupplierSearchStatus.success)
+                  .map((p) => p.supplierId),
+            ];
+
+            return SafeArea(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(
+                  20,
+                  8,
+                  20,
+                  MediaQuery.of(context).viewInsets.bottom + 20,
+                ),
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Text(
+                        'Filter results',
+                        style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
+                      ),
+                      const SizedBox(height: 16),
+                      DropdownButtonFormField<String>(
+                        value: suppliers.contains(supplier) ? supplier : 'All',
+                        decoration: const InputDecoration(
+                          labelText: 'Supplier',
+                          prefixIcon: Icon(Icons.storefront_outlined),
+                        ),
+                        items: suppliers
+                            .map((id) => DropdownMenuItem(
+                                  value: id,
+                                  child: Text(id == 'All' ? 'All suppliers' : id.toUpperCase()),
+                                ))
+                            .toList(),
+                        onChanged: (value) => setSheetState(() => supplier = value == 'All' ? null : value),
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<int>(
+                        value: minStars,
+                        decoration: const InputDecoration(
+                          labelText: 'Minimum stars',
+                          prefixIcon: Icon(Icons.star_outline),
+                        ),
+                        items: const [
+                          DropdownMenuItem(value: 3, child: Text('3+ stars')),
+                          DropdownMenuItem(value: 4, child: Text('4+ stars')),
+                          DropdownMenuItem(value: 5, child: Text('5 stars')),
+                        ],
+                        onChanged: (value) => setSheetState(() => minStars = value),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: priceController,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        decoration: InputDecoration(
+                          labelText: 'Maximum price',
+                          prefixText: state.criteria.currency + ' ',
+                          prefixIcon: const Icon(Icons.payments_outlined),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        value: meal,
+                        decoration: const InputDecoration(
+                          labelText: 'Meal plan',
+                          prefixIcon: Icon(Icons.restaurant_outlined),
+                        ),
+                        items: const [
+                          DropdownMenuItem(value: 'Room Only', child: Text('Room Only')),
+                          DropdownMenuItem(value: 'Breakfast', child: Text('Breakfast')),
+                          DropdownMenuItem(value: 'Half Board', child: Text('Half Board')),
+                          DropdownMenuItem(value: 'Full Board', child: Text('Full Board')),
+                          DropdownMenuItem(value: 'All Inclusive', child: Text('All Inclusive')),
+                        ],
+                        onChanged: (value) => setSheetState(() => meal = value),
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        value: cancellation,
+                        decoration: const InputDecoration(
+                          labelText: 'Cancellation',
+                          prefixIcon: Icon(Icons.event_available_outlined),
+                        ),
+                        items: const [
+                          DropdownMenuItem(value: 'Free cancellation', child: Text('Free cancellation')),
+                          DropdownMenuItem(value: 'Non-refundable', child: Text('Non-refundable')),
+                        ],
+                        onChanged: (value) => setSheetState(() => cancellation = value),
+                      ),
+                      SwitchListTile.adaptive(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Available offers only'),
+                        value: availableOnly,
+                        onChanged: (value) => setSheetState(() => availableOnly = value),
+                      ),
+                      const SizedBox(height: 8),
+                      FilledButton(
+                        onPressed: () {
+                          context.read<SearchCubit>().applyFilters(
+                                ResultFilters(
+                                  maxPrice: double.tryParse(priceController.text.trim()),
+                                  minRating: minStars,
+                                  supplierId: supplier,
+                                  mealPlan: meal,
+                                  cancellationPolicy: cancellation,
+                                  availableOnly: availableOnly,
+                                ),
+                              );
+                          Navigator.of(sheetContext).pop();
+                        },
+                        child: const Text('Apply filters'),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          context.read<SearchCubit>().applyFilters(const ResultFilters());
+                          Navigator.of(sheetContext).pop();
+                        },
+                        child: const Text('Clear filters'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    priceController.dispose();
   }
 
   Widget _buildProgressView(List<SupplierSearchProgress> progressList) {
