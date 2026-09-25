@@ -42,7 +42,28 @@ class SearchResultsScreen extends StatelessWidget {
           } else if (state is SearchInProgress) {
             return _buildProgressView(state.progress);
           } else if (state is SearchFailure) {
-            return Center(child: Text('Error: ${state.error}', style: const TextStyle(color: Colors.red)));
+            return SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Icon(Icons.error_outline, size: 56, color: Colors.red),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Search failed',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 12),
+                  SelectableText(state.error),
+                  const SizedBox(height: 24),
+                  OutlinedButton(
+                    onPressed: () => context.pop(),
+                    child: const Text('Back to Search'),
+                  ),
+                ],
+              ),
+            );
           } else if (state is SearchSuccess) {
             final hotels = state.filteredHotels;
             if (hotels.isEmpty) {
@@ -66,10 +87,11 @@ class SearchResultsScreen extends StatelessWidget {
                         icon: const Icon(Icons.filter_list),
                         label: const Text('Filters'),
                         onPressed: () {
-                          // Simple mock filter application
-                          final currentFilters = state.filters;
-                          final newFilters = currentFilters.copyWith(availableOnly: !currentFilters.availableOnly);
-                          context.read<SearchCubit>().applyFilters(newFilters);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Filters will only be applied when backed by real result data.'),
+                            ),
+                          );
                         },
                       ),
                     ],
