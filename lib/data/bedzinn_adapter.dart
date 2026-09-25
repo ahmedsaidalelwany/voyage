@@ -46,17 +46,33 @@ class BedzinnAdapter implements SupplierAdapter {
   @override
   Future<bool> checkAuthSuccess(WebViewController controller, String url) async {
     try {
-      final result = await controller.runJavaScriptReturningResult(r"""
+      final raw = await controller.runJavaScriptReturningResult(r'''
         (function() {
           const text = document.body ? document.body.innerText : '';
+          const path = location.pathname || '';
+          const inputs = Array.from(document.querySelectorAll('input'));
+          const hasPassword = inputs.some(function(input) {
+            return (input.type || '').toLowerCase() === 'password';
+          });
+          const hasLogin = /\\bLogin\\b|\\bSign in\\b|\\bLog in\\b|تسجيل الدخول|دخول/i.test(text);
+          const hasLogout = /\\bLogout\\b|\\bSign out\\b|\\bLog out\\b|\\bMy Account\\b|تسجيل خروج|خروج/i.test(text);
+          const accountMarker = /\\bDashboard\\b|\\bAccount\\b|\\bBookings\\b|حسابي|لوحة التحكم|الحجوزات/i.test(text);
+          const privatePath = /\\/(dashboard|account|profile|booking|bookings|home)(?:[/?#]|$)/i.test(path);
           return JSON.stringify({
-            hasLogout: /\bLogout\b|\bSign out\b|\bMy Account\b/i.test(text),
-            hasLogin:  /\bLogin\b|\bSign in\b/i.test(text)
+            hasPassword,
+            hasLogin,
+            hasLogout,
+            accountMarker,
+            privatePath
           });
         })();
-      """);
-      final decoded = jsonDecode(_unwrapJsString(result));
-      return decoded['hasLogout'] == true && decoded['hasLogin'] != true;
+      ''');
+      final text = _unwrapJsString(raw);
+      final decoded = jsonDecode(text) as Map<String, dynamic>;
+      return (decoded['hasLogout'] == true ||
+              (decoded['accountMarker'] == true && decoded['privatePath'] == true)) &&
+          decoded['hasPassword'] != true &&
+          decoded['hasLogin'] != true;
     } catch (e) {
       developer.log('[Bedzinn] Auth check failed: $e');
       return false;
