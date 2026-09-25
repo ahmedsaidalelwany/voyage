@@ -25,9 +25,152 @@ class _HomeSearchScreenState extends State<HomeSearchScreen> {
   DateTime _checkOut = DateTime.now().add(const Duration(days: 11));
   List<RoomOccupancy> _rooms = [const RoomOccupancy(adults: 2)];
   String _currency = 'AED';
+  String? _hotelName;
+  int? _minimumStars;
+  double? _maximumPrice;
+  String? _mealPlan;
+  String? _cancellationPreference;
+  bool _availableOnly = false;
 
   final List<String> _currencies = ['USD', 'EUR', 'GBP', 'AED', 'EGP', 'SAR', 'QAR', 'KWD', 'BHD', 'OMR'];
   final DestinationService _destinationService = DestinationService();
+
+
+  Future<void> _showAdvancedSearch() async {
+    final hotelController = TextEditingController(text: _hotelName ?? '');
+    final priceController = TextEditingController(
+      text: _maximumPrice?.toStringAsFixed(0) ?? '',
+    );
+    var stars = _minimumStars;
+    var meal = _mealPlan;
+    var cancellation = _cancellationPreference;
+    var availableOnly = _availableOnly;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return SafeArea(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(
+                  20,
+                  8,
+                  20,
+                  MediaQuery.of(context).viewInsets.bottom + 20,
+                ),
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Text(
+                        'Advanced hotel search',
+                        style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Criteria are passed to the supplier integration when supported and are also applied to returned offers.',
+                      ),
+                      const SizedBox(height: 18),
+                      TextField(
+                        controller: hotelController,
+                        decoration: const InputDecoration(
+                          labelText: 'Hotel name',
+                          prefixIcon: Icon(Icons.hotel_outlined),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<int>(
+                        value: stars,
+                        decoration: const InputDecoration(
+                          labelText: 'Minimum stars',
+                          prefixIcon: Icon(Icons.star_outline),
+                        ),
+                        items: [3, 4, 5]
+                            .map((value) => DropdownMenuItem(
+                                  value: value,
+                                  child: Text(value.toString() + ' stars & above'),
+                                ))
+                            .toList(),
+                        onChanged: (value) => setSheetState(() => stars = value),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: priceController,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        decoration: InputDecoration(
+                          labelText: 'Maximum price per offer',
+                          prefixText: _currency + ' ',
+                          prefixIcon: const Icon(Icons.payments_outlined),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        value: meal,
+                        decoration: const InputDecoration(
+                          labelText: 'Meal plan',
+                          prefixIcon: Icon(Icons.restaurant_outlined),
+                        ),
+                        items: const [
+                          DropdownMenuItem(value: 'Room Only', child: Text('Room Only')),
+                          DropdownMenuItem(value: 'Breakfast', child: Text('Breakfast')),
+                          DropdownMenuItem(value: 'Half Board', child: Text('Half Board')),
+                          DropdownMenuItem(value: 'Full Board', child: Text('Full Board')),
+                          DropdownMenuItem(value: 'All Inclusive', child: Text('All Inclusive')),
+                        ],
+                        onChanged: (value) => setSheetState(() => meal = value),
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        value: cancellation,
+                        decoration: const InputDecoration(
+                          labelText: 'Cancellation',
+                          prefixIcon: Icon(Icons.event_available_outlined),
+                        ),
+                        items: const [
+                          DropdownMenuItem(value: 'Free cancellation', child: Text('Free cancellation')),
+                          DropdownMenuItem(value: 'Non-refundable', child: Text('Non-refundable')),
+                        ],
+                        onChanged: (value) => setSheetState(() => cancellation = value),
+                      ),
+                      SwitchListTile.adaptive(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Available offers only'),
+                        value: availableOnly,
+                        onChanged: (value) => setSheetState(() => availableOnly = value),
+                      ),
+                      const SizedBox(height: 8),
+                      FilledButton(
+                        onPressed: () {
+                          setState(() {
+                            _hotelName = hotelController.text.trim().isEmpty
+                                ? null
+                                : hotelController.text.trim();
+                            _minimumStars = stars;
+                            _maximumPrice = double.tryParse(priceController.text.trim());
+                            _mealPlan = meal;
+                            _cancellationPreference = cancellation;
+                            _availableOnly = availableOnly;
+                          });
+                          Navigator.of(sheetContext).pop();
+                        },
+                        child: const Text('Apply advanced search'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    hotelController.dispose();
+    priceController.dispose();
+  }
 
   void _performSearch(BuildContext context) {
     if (_selectedDestination == null) {
@@ -41,6 +184,12 @@ class _HomeSearchScreenState extends State<HomeSearchScreen> {
       checkOut: _checkOut,
       rooms: _rooms,
       currency: _currency,
+      hotelName: _hotelName,
+      minimumStars: _minimumStars,
+      maximumPrice: _maximumPrice,
+      mealPlan: _mealPlan,
+      cancellationPreference: _cancellationPreference,
+      availableOnly: _availableOnly,
     );
     
     // SAFE DIAGNOSTIC LOGGING (Phase 3)
@@ -64,6 +213,17 @@ occupancy = ${criteria.rooms.map((r) => '\${r.adults}A, \${r.childrenAges.length
 
     context.read<SearchCubit>().search(criteria, connectedAdapters);
     context.push('/results', extra: criteria);
+  }
+
+  int get _selectedAdvancedCount {
+    var count = 0;
+    if (_hotelName != null) count++;
+    if (_minimumStars != null) count++;
+    if (_maximumPrice != null) count++;
+    if (_mealPlan != null) count++;
+    if (_cancellationPreference != null) count++;
+    if (_availableOnly) count++;
+    return count;
   }
 
   void _editGuests() async {
@@ -248,11 +408,21 @@ occupancy = ${criteria.rooms.map((r) => '\${r.adults}A, \${r.childrenAges.length
                 ),
               ),
             ),
-            const SizedBox(height: 32),
-            ElevatedButton(
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: _showAdvancedSearch,
+              icon: const Icon(Icons.tune),
+              label: Text(
+                _selectedAdvancedCount == 0
+                    ? 'Advanced search'
+                    : 'Advanced search (' + _selectedAdvancedCount.toString() + ')',
+              ),
+            ),
+            const SizedBox(height: 12),
+            FilledButton(
               onPressed: () => _performSearch(context),
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 16),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(54),
               ),
               child: const Text('Search Hotels', style: TextStyle(fontSize: 18)),
             ),
